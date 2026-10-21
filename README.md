@@ -73,6 +73,13 @@ git clone https://github.com/VerSonetto/selena.git
 cd selena
 ```
 
+## Releases
+
+- Push to `main` updates the [nightly prerelease](https://github.com/VerSonetto/selena/releases/tag/nightly).
+- Push a version tag such as `v0.1.0` to publish a stable release.
+
+Both include the Windows NSIS installer and `SHA256SUMS.txt`. The release workflow is Windows-only by design; PR CI runs the fast Rust/web checks on Ubuntu.
+
 ## Windows installer
 
 ```powershell
