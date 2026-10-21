@@ -44,7 +44,7 @@ On Unix installers create `Selena` and `SELENA` symlinks so the executable name 
 | Responses | convert | passthrough | convert |
 | Messages | convert | convert | passthrough |
 
-Same-protocol requests preserve native SSE and native-only features. Cross-protocol native-only features (`previous_response_id`, hosted/server tools, audio, `n>1`) return a structured `unsupported_feature` error instead of being silently faked. Anthropic thinking blocks and signatures are opaque and provider-bound, so they are dropped with a conversion warning when crossing protocols; Selena never fabricates or replays them.
+Same-protocol requests preserve native SSE and native-only features. Cross-protocol native-only features (`previous_response_id`, active hosted/server tool definitions, audio, `n>1`) return a structured `unsupported_feature` error instead of being silently faked. Anthropic thinking blocks, signatures, and historical server-tool blocks are opaque and provider-bound, so they are dropped with a conversion warning when crossing protocols; Selena never fabricates or replays them.
 
 See [docs/architecture.md](docs/architecture.md), [docs/protocol-research.md](docs/protocol-research.md), [docs/api.md](docs/api.md), and [docs/design-system.md](docs/design-system.md).
 

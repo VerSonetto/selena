@@ -22,8 +22,8 @@ Selena does **not** have a fixed Chat Completions egress. Every provider declare
 
 - **Diagonal**: the request is forwarded in its original protocol. Only model routing/auth is applied; SSE bytes are relayed. Native-only features such as Responses state/hosted tools or Anthropic thinking/server tools remain intact.
 - **Off-diagonal**: request decodes to a canonical IR, the target encoder emits the provider body, and the upstream response is decoded and encoded back to the ingress protocol.
-- **Fail-fast**: native-only capability that cannot be represented in the target protocol returns `unsupported_feature`. Hosted tools, Responses state, and audio are never simulated.
-- **Opaque reasoning**: Anthropic thinking blocks and signatures cannot cross protocols by design. They are dropped with a conversion warning rather than rejected, so clients that replay thinking history can still use non-Anthropic providers. Selena never fabricates or replays a thinking signature.
+- **Fail-fast**: native-only capability that cannot be represented in the target protocol returns `unsupported_feature`. Active hosted/server tool definitions, Responses state, and audio are never simulated.
+- **Opaque history**: Anthropic thinking blocks, signatures, and server-tool result blocks cannot cross protocols by design. They are dropped with a conversion warning rather than rejected, so clients that replay full history (including Claude Code) can still use non-Anthropic providers. Selena never fabricates or replays a signature.
 
 ## Crate layout
 

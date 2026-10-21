@@ -274,8 +274,6 @@ pub struct StateOptions {
 pub struct ReasoningOptions {
     pub effort: Option<String>,
     pub summary: Option<String>,
-    pub budget_tokens: Option<u32>,
-    pub thinking_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -290,6 +288,9 @@ pub enum Capability {
     Truncation,
     ReasoningItems,
     ThinkingBlocks,
+    LegacyThinkingBudget,
+    ServerToolHistory,
+    UnknownContent(String),
     Audio,
     MultipleChoices,
     AllowedTools,

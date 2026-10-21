@@ -38,6 +38,16 @@ pub fn validate_request(
                     target.as_str(),
                 ));
             }
+            Capability::ServerToolHistory => {
+                warnings.push("server tool history blocks are dropped when converting protocols");
+            }
+            Capability::UnknownContent(name) => {
+                return Err(ProtocolError::unsupported(
+                    name,
+                    request.source.as_str(),
+                    target.as_str(),
+                ));
+            }
             Capability::ResponsesState => {
                 return Err(ProtocolError::unsupported(
                     "responses_state",
@@ -83,6 +93,11 @@ pub fn validate_request(
             Capability::ThinkingBlocks => {
                 warnings.push(
                     "native thinking blocks and signatures are dropped; reasoning effort is forwarded to the target",
+                );
+            }
+            Capability::LegacyThinkingBudget => {
+                warnings.push(
+                    "legacy thinking.budget_tokens is ignored across protocols; use output_config.effort",
                 );
             }
             Capability::Audio => {

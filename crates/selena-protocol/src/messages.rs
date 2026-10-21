@@ -53,24 +53,10 @@ pub fn decode_request(value: &Value) -> Result<CanonicalRequest, ProtocolError> 
             request.reasoning.effort = Some(effort.to_string());
         }
     }
-    if let Some(thinking) = object.get("thinking").and_then(Value::as_object) {
-        request.reasoning.thinking_type = thinking
-            .get("type")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        request.reasoning.budget_tokens = thinking
-            .get("budget_tokens")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok());
-        if request.reasoning.thinking_type.as_deref() == Some("enabled")
-            && request.reasoning.effort.is_none()
-        {
-            request.reasoning.effort = request
-                .reasoning
-                .budget_tokens
-                .map(|budget| reasoning_effort_for_budget(budget).to_string());
-        }
-        request.mark(Capability::ThinkingBlocks);
+    if let Some(thinking) = object.get("thinking").and_then(Value::as_object)
+        && thinking.get("type").and_then(Value::as_str) == Some("enabled")
+    {
+        request.mark(Capability::LegacyThinkingBudget);
     }
     request.temperature = optional_f64(object, "temperature");
     request.top_p = optional_f64(object, "top_p");
@@ -86,16 +72,13 @@ pub fn decode_request(value: &Value) -> Result<CanonicalRequest, ProtocolError> 
     {
         request.user = Some(user_id.to_string());
     }
-    if object.get("container").is_some()
-        || object.get("diagnostics").is_some()
-        || object.get("inference_geo").is_some()
-        || object.get("speed").is_some()
-        || object.get("mcp_servers").is_some()
-    {
-        request.mark(Capability::Unknown);
+    for field in ["container", "diagnostics", "inference_geo", "speed"] {
+        if object.get(field).is_some() {
+            request.mark(Capability::UnknownContent(format!("request_field:{field}")));
+        }
     }
-    if object.get("metadata").is_some() {
-        request.mark(Capability::Unknown);
+    if object.get("mcp_servers").is_some() {
+        request.mark(Capability::ServerTools);
     }
 
     Ok(request)
@@ -291,14 +274,20 @@ fn decode_message(value: &Value, request: &mut CanonicalRequest) -> Result<(), P
             | "code_execution_tool_result"
             | "bash_code_execution_tool_result"
             | "text_editor_code_execution_tool_result"
-            | "tool_search_tool_result" => {
-                request.mark(Capability::ServerTools);
-            }
-            "search_result" | "container_upload" => {
-                request.mark(Capability::Unknown);
+            | "tool_search_tool_result"
+            | "tool_search_tool_search_result"
+            | "mcp_tool_use"
+            | "mcp_tool_result"
+            | "search_result"
+            | "container_upload" => {
+                request.mark(Capability::ServerToolHistory);
             }
             _ => {
-                request.mark(Capability::Unknown);
+                let kind = object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                request.mark(Capability::UnknownContent(format!("content_block:{kind}")));
                 normal.push(ContentPart::Unknown {
                     protocol: Protocol::Messages,
                     value: block.clone(),
@@ -414,7 +403,9 @@ fn decode_document_content(
                             detail: None,
                         });
                     }
-                    _ => request.mark(Capability::Unknown),
+                    other => request.mark(Capability::UnknownContent(format!(
+                        "document_content:{other}"
+                    ))),
                 }
             }
             Ok(out)
@@ -479,9 +470,9 @@ fn parse_tool_result_content(
                     media_type: decoded.media_type,
                 });
             }
-            _ => {
-                request.mark(Capability::Unknown);
-            }
+            other => request.mark(Capability::UnknownContent(format!(
+                "tool_result_content:{other}"
+            ))),
         }
     }
     Ok(out)
@@ -1189,14 +1180,6 @@ pub fn decode_usage(value: Option<&Value>) -> Usage {
             .and_then(|details| details.get("thinking_tokens"))
             .and_then(Value::as_u64),
         server_tool_use: usage.get("server_tool_use").cloned(),
-    }
-}
-
-fn reasoning_effort_for_budget(budget_tokens: u32) -> &'static str {
-    match budget_tokens {
-        0..=2048 => "low",
-        2049..=8192 => "medium",
-        _ => "high",
     }
 }
 

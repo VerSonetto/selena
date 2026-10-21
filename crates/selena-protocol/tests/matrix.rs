@@ -190,7 +190,13 @@ fn cross_protocol_thinking_is_dropped_with_warning() {
             .iter()
             .any(|warning| warning.contains("thinking"))
     );
-    assert_eq!(chat["reasoning_effort"], "low");
+    assert!(chat.get("reasoning_effort").is_none());
+    assert!(
+        warnings
+            .0
+            .iter()
+            .any(|warning| warning.contains("budget_tokens"))
+    );
     assert_eq!(chat["messages"][1]["content"], "visible answer");
     let encoded = chat.to_string();
     assert!(!encoded.contains("private reasoning"));
@@ -225,6 +231,60 @@ fn anthropic_effort_levels_pass_through() {
 
     let (responses, _) = convert::request_to(&ir, Protocol::Responses).unwrap();
     assert_eq!(responses["reasoning"]["effort"], "xhigh");
+}
+
+#[test]
+fn messages_metadata_is_forwarded_without_failing() {
+    let payload = json!({
+        "model": "test-model",
+        "max_tokens": 256,
+        "metadata": {"user_id": "user_123"},
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+    let ir = messages::decode_request(&payload).unwrap();
+    let (chat, warnings) = convert::request_to(&ir, Protocol::Chat).unwrap();
+    assert_eq!(chat["user"], "user_123");
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn server_tool_history_is_dropped() {
+    let payload = json!({
+        "model": "test-model",
+        "max_tokens": 256,
+        "messages": [
+            {"role": "user", "content": "search something"},
+            {"role": "assistant", "content": [
+                {"type": "server_tool_use", "id": "srv_1", "name": "web_search", "input": {"query": "x"}},
+                {"type": "web_search_tool_result", "tool_use_id": "srv_1", "content": []},
+                {"type": "tool_search_tool_search_result", "tool_references": []},
+                {"type": "text", "text": "final answer"}
+            ]}
+        ]
+    });
+    let ir = messages::decode_request(&payload).unwrap();
+    let (chat, warnings) = convert::request_to(&ir, Protocol::Chat).unwrap();
+    assert!(
+        warnings
+            .0
+            .iter()
+            .any(|warning| warning.contains("server tool history"))
+    );
+    assert_eq!(chat["messages"][1]["content"], "final answer");
+}
+
+#[test]
+fn unknown_content_reports_the_block_type() {
+    let payload = json!({
+        "model": "test-model",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": [
+            {"type": "future_block", "payload": "x"}
+        ]}]
+    });
+    let ir = messages::decode_request(&payload).unwrap();
+    let error = convert::request_to(&ir, Protocol::Chat).unwrap_err();
+    assert_eq!(error.feature.as_deref(), Some("content_block:future_block"));
 }
 
 #[test]
