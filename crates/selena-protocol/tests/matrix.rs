@@ -209,6 +209,25 @@ fn cross_protocol_thinking_is_dropped_with_warning() {
 }
 
 #[test]
+fn anthropic_effort_levels_pass_through() {
+    let messages_payload = json!({
+        "model": "test-model",
+        "max_tokens": 4096,
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "xhigh"},
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+    let ir = messages::decode_request(&messages_payload).unwrap();
+    assert_eq!(ir.reasoning.effort.as_deref(), Some("xhigh"));
+
+    let (chat, _) = convert::request_to(&ir, Protocol::Chat).unwrap();
+    assert_eq!(chat["reasoning_effort"], "xhigh");
+
+    let (responses, _) = convert::request_to(&ir, Protocol::Responses).unwrap();
+    assert_eq!(responses["reasoning"]["effort"], "xhigh");
+}
+
+#[test]
 fn response_matrix_shapes() {
     let mut response = CanonicalResponse::new(Protocol::Chat, "chatcmpl-1", "test-model");
     response.output.push(OutputItem::Message {

@@ -111,7 +111,7 @@ Cross-protocol requests return `unsupported_feature` for:
 
 Same-protocol passthrough preserves these features because the provider is native for that protocol.
 
-Anthropic `thinking` / `redacted_thinking` blocks and their signatures are opaque and bound to the originating provider. Cross-protocol conversion drops them and records a conversion warning instead of rejecting the request. When `thinking.type` is `enabled`, `budget_tokens` is approximated to Chat `reasoning_effort` / Responses `reasoning.effort` (`low` ≤ 2048, `medium` ≤ 8192, otherwise `high`) so the target model can still reason fresh. Reasoning output items from a Responses upstream remain unsupported across protocols.
+Anthropic `thinking` / `redacted_thinking` blocks and their signatures are opaque and bound to the originating provider. Cross-protocol conversion drops them and records a conversion warning instead of rejecting the request. Reasoning depth is controlled by `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`) and is forwarded verbatim to Chat `reasoning_effort` / Responses `reasoning.effort`. Only the deprecated `thinking.type = "enabled"` form uses `budget_tokens`; when no `effort` is supplied, it is approximated (`low` ≤ 2048, `medium` ≤ 8192, otherwise `high`). Reasoning output items from a Responses upstream remain unsupported across protocols.
 
 ## Official references
 

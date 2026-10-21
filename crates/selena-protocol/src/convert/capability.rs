@@ -82,7 +82,7 @@ pub fn validate_request(
             }
             Capability::ThinkingBlocks => {
                 warnings.push(
-                    "thinking blocks and signatures are dropped; the thinking budget is approximated as reasoning effort",
+                    "native thinking blocks and signatures are dropped; reasoning effort is forwarded to the target",
                 );
             }
             Capability::Audio => {
