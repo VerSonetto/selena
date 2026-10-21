@@ -152,7 +152,7 @@ export function Models() {
                     </td>
                     <td>
                       <CopyButton
-                        value={`${model.providers[0]?.id ?? ""}/${model.id}`}
+                        value={`${model.providers[0]?.name ?? ""}/${model.id}`}
                         label="复制 model"
                       />
                     </td>

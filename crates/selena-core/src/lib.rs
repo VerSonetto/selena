@@ -359,17 +359,25 @@ impl Core {
     pub async fn list_models(&self) -> Result<Vec<String>> {
         let routes: Vec<Route> = self.store.list_routes().await?;
         let providers = self.store.list_providers().await?;
+        let enabled = providers
+            .iter()
+            .filter(|provider| provider.enabled)
+            .map(|provider| (provider.id.as_str(), provider))
+            .collect::<HashMap<_, _>>();
         let mut models = routes
             .into_iter()
             .filter(|route| route.enabled)
             .map(|route| route.model_alias)
             .collect::<Vec<_>>();
-        for provider in providers.into_iter().filter(|provider| provider.enabled) {
-            models.push(format!("{}/auto", provider.id));
+        for provider in enabled.values() {
+            models.push(format!("{}/auto", provider.name));
         }
         for (provider_id, cached) in self.models_cache.lock().iter() {
+            let Some(provider) = enabled.get(provider_id.as_str()) else {
+                continue;
+            };
             for model in &cached.models {
-                models.push(format!("{provider_id}/{}", model.id));
+                models.push(format!("{}/{}", provider.name, model.id));
             }
         }
         models.sort();

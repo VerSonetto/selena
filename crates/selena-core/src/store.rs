@@ -51,6 +51,12 @@ impl Store {
 
     pub async fn create_provider(&self, input: CreateProvider) -> Result<Provider> {
         let protocol = normalize_protocol(&input.protocol)?;
+        let name = input.name.trim();
+        anyhow::ensure!(!name.is_empty(), "provider name cannot be empty");
+        anyhow::ensure!(
+            !name.contains('/'),
+            "provider name cannot contain '/' because it is used as the model prefix"
+        );
         anyhow::ensure!(
             input.base_url.starts_with("http://") || input.base_url.starts_with("https://"),
             "provider base_url must use http or https"
@@ -65,7 +71,7 @@ impl Store {
              VALUES (?,?,?,?,?,?,1,?,?,?)",
         )
         .bind(&id)
-        .bind(&input.name)
+        .bind(name)
         .bind(protocol)
         .bind(input.base_url.trim_end_matches('/'))
         .bind(auth_type)
@@ -84,6 +90,12 @@ impl Store {
     pub async fn update_provider(&self, id: &str, input: UpdateProvider) -> Result<Provider> {
         let current = self.get_provider(id).await?.context("provider not found")?;
         let name = input.name.unwrap_or(current.name);
+        let name = name.trim();
+        anyhow::ensure!(!name.is_empty(), "provider name cannot be empty");
+        anyhow::ensure!(
+            !name.contains('/'),
+            "provider name cannot contain '/' because it is used as the model prefix"
+        );
         let base_url = input.base_url.unwrap_or(current.base_url);
         anyhow::ensure!(
             base_url.starts_with("http://") || base_url.starts_with("https://"),

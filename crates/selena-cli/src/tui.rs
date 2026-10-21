@@ -435,9 +435,17 @@ fn render_routes(frame: &mut Frame, area: Rect, data: &TuiData) {
         return;
     }
     let rows = data.routes.iter().map(|route| {
+        let provider = data
+            .providers
+            .iter()
+            .find(|provider| provider.id == route.provider_id)
+            .map_or_else(
+                || route.provider_id.clone(),
+                |provider| provider.name.clone(),
+            );
         Row::new(vec![
             Cell::from(route.model_alias.clone()),
-            Cell::from(route.provider_id.clone()),
+            Cell::from(provider),
             Cell::from(route.upstream_model.clone()),
         ])
         .style(Style::default().fg(INK).bg(SURFACE))

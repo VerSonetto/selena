@@ -51,7 +51,7 @@ export function Playground() {
 
   const selectedProvider = entries.find((entry) => entry.provider.id === providerId) ?? entries[0];
   const effectiveProvider = selectedProvider?.provider;
-  const model = effectiveProvider ? `${effectiveProvider.id}/${upstreamModel}` : upstreamModel;
+  const model = effectiveProvider ? `${effectiveProvider.name}/${upstreamModel}` : upstreamModel;
 
   const body = useMemo(() => {
     const base: Record<string, unknown> = { model, stream };
