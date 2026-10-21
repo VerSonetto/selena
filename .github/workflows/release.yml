@@ -1,0 +1,107 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cache the expensive release dependencies and build artifacts. This is
+      # intentionally Windows-only: Windows is the first-class installer target,
+      # and avoiding a second desktop matrix cuts release time substantially.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: selena-release-windows
+          cache-on-failure: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Read version and release tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+            $prerelease = "false"
+            $title = "Selena $tag"
+            $notes = "Release $tag."
+          } else {
+            $tag = "nightly"
+            $prerelease = "true"
+            $title = "Selena nightly · v$version"
+            $notes = "Automated Windows build from main at $env:GITHUB_SHA."
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "PRERELEASE=$prerelease" >> $env:GITHUB_ENV
+          "RELEASE_TITLE=$title" >> $env:GITHUB_ENV
+          "RELEASE_NOTES=$notes" >> $env:GITHUB_ENV
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./scripts/build-desktop.ps1
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $bundle = "target/release/bundle/nsis"
+          Get-ChildItem $bundle -Filter "*.exe" | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content "$bundle/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $bundle = "target/release/bundle/nsis"
+          $assets = @(Get-ChildItem $bundle -Filter "*.exe" | Select-Object -ExpandProperty FullName)
+          $assets += (Join-Path $bundle "SHA256SUMS.txt")
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber
+            gh release edit $tag --title $env:RELEASE_TITLE --notes $env:RELEASE_NOTES
+          } else {
+            $createArgs = @($tag) + $assets + @("--title", $env:RELEASE_TITLE, "--notes", $env:RELEASE_NOTES)
+            if ($env:PRERELEASE -eq "true") {
+              $createArgs += @("--prerelease", "--latest=false")
+            } else {
+              $createArgs += "--latest"
+            }
+            gh release create @createArgs
+          }

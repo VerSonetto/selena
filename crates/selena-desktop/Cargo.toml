@@ -1,0 +1,25 @@
+[package]
+name = "selena-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Selena Tauri desktop shell"
+
+[[bin]]
+name = "selena-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+selena-core = { path = "../selena-core" }
+selena-server = { path = "../selena-server" }
+anyhow.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true

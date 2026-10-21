@@ -1,0 +1,33 @@
+[package]
+name = "selena-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP gateway and admin API for Selena"
+
+[dependencies]
+selena-core = { path = "../selena-core" }
+selena-protocol = { path = "../selena-protocol" }
+anyhow.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+http.workspace = true
+mime.workspace = true
+reqwest.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+tempfile = "3"
+tokio-stream.workspace = true

@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: selena-ci-${{ runner.os }}
+          cache-on-failure: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Build web
+        run: pnpm --dir web build
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # Tauri desktop is validated by the Windows release workflow.
+      # Keeping it out of PR CI avoids installing Linux WebKit/GTK packages.
+      - name: Clippy
+        run: >-
+          cargo clippy
+          -p selena-protocol -p selena-core -p selena-server -p selena-cli
+          --all-targets -- -D warnings
+
+      - name: Test
+        run: >-
+          cargo test
+          -p selena-protocol -p selena-core -p selena-server -p selena-cli
