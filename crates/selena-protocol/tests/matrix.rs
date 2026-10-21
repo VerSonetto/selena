@@ -155,16 +155,6 @@ fn unsupported_native_features_fail_fast() {
     let error = convert::request_to(&ir, Protocol::Chat).unwrap_err();
     assert_eq!(error.code.as_deref(), Some("unsupported_feature"));
 
-    let messages_payload = json!({
-        "model": "test-model",
-        "max_tokens": 128,
-        "messages": [{"role": "user", "content": "hello"}],
-        "thinking": {"type": "enabled", "budget_tokens": 1024}
-    });
-    let ir = messages::decode_request(&messages_payload).unwrap();
-    let error = convert::request_to(&ir, Protocol::Chat).unwrap_err();
-    assert_eq!(error.code.as_deref(), Some("unsupported_feature"));
-
     let chat = json!({
         "model": "test-model",
         "messages": [{"role": "user", "content": "hello"}],
@@ -173,6 +163,49 @@ fn unsupported_native_features_fail_fast() {
     let ir = chat::decode_request(&chat).unwrap();
     let error = convert::request_to(&ir, Protocol::Messages).unwrap_err();
     assert_eq!(error.code.as_deref(), Some("unsupported_feature"));
+}
+
+#[test]
+fn cross_protocol_thinking_is_dropped_with_warning() {
+    let messages_payload = json!({
+        "model": "test-model",
+        "max_tokens": 128,
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+        "messages": [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "private reasoning", "signature": "sig_123"},
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "text", "text": "visible answer"}
+            ]},
+            {"role": "user", "content": "continue"}
+        ]
+    });
+    let ir = messages::decode_request(&messages_payload).unwrap();
+
+    let (chat, warnings) = convert::request_to(&ir, Protocol::Chat).unwrap();
+    assert!(
+        warnings
+            .0
+            .iter()
+            .any(|warning| warning.contains("thinking"))
+    );
+    assert_eq!(chat["reasoning_effort"], "low");
+    assert_eq!(chat["messages"][1]["content"], "visible answer");
+    let encoded = chat.to_string();
+    assert!(!encoded.contains("private reasoning"));
+    assert!(!encoded.contains("sig_123"));
+
+    let (responses, warnings) = convert::request_to(&ir, Protocol::Responses).unwrap();
+    assert!(
+        warnings
+            .0
+            .iter()
+            .any(|warning| warning.contains("thinking"))
+    );
+    let encoded = responses.to_string();
+    assert!(!encoded.contains("private reasoning"));
+    assert!(!encoded.contains("opaque"));
 }
 
 #[test]

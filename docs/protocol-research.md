@@ -105,12 +105,13 @@ Cross-protocol requests return `unsupported_feature` for:
 - Responses state (`store: true`, `previous_response_id`, `conversation`)
 - Responses hosted tools and hosted outputs
 - Anthropic server tools / MCP / containers
-- reasoning/thinking content and signatures
 - audio
 - Chat `n > 1`
 - prompt templates and unsupported native output
 
 Same-protocol passthrough preserves these features because the provider is native for that protocol.
+
+Anthropic `thinking` / `redacted_thinking` blocks and their signatures are opaque and bound to the originating provider. Cross-protocol conversion drops them and records a conversion warning instead of rejecting the request. When `thinking.type` is `enabled`, `budget_tokens` is approximated to Chat `reasoning_effort` / Responses `reasoning.effort` (`low` ≤ 2048, `medium` ≤ 8192, otherwise `high`) so the target model can still reason fresh. Reasoning output items from a Responses upstream remain unsupported across protocols.
 
 ## Official references
 

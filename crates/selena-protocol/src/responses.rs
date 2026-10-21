@@ -639,7 +639,12 @@ pub fn encode_request(request: &CanonicalRequest) -> Result<Value, ProtocolError
                             "name": name,
                             "arguments": tool_arguments_string(input, raw_arguments.as_deref()),
                         })),
-                        _ => content.push(content_part_to_responses(part, message.role)?),
+                        _ => {
+                            let part = content_part_to_responses(part, message.role)?;
+                            if !part.is_null() {
+                                content.push(part);
+                            }
+                        }
                     }
                 }
                 if !content.is_empty() {
@@ -841,13 +846,7 @@ fn content_part_to_responses(part: &ContentPart, role: Role) -> Result<Value, Pr
             "type": "input_audio",
             "input_audio": {"data": data, "format": format},
         }),
-        ContentPart::Thinking { .. } => {
-            return Err(ProtocolError::unsupported(
-                "thinking_content",
-                "unknown",
-                Protocol::Responses.as_str(),
-            ));
-        }
+        ContentPart::Thinking { .. } => Value::Null,
         ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => {
             return Err(ProtocolError::invalid(
                 "tool content must be emitted as a dedicated input item",
@@ -871,7 +870,10 @@ fn tool_output_to_responses(content: &[ContentPart]) -> Result<Value, ProtocolEr
     }
     let mut parts = Vec::new();
     for part in content {
-        parts.push(content_part_to_responses(part, Role::Tool)?);
+        let part = content_part_to_responses(part, Role::Tool)?;
+        if !part.is_null() {
+            parts.push(part);
+        }
     }
     Ok(Value::Array(parts))
 }

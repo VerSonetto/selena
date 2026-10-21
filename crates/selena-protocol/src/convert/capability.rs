@@ -81,11 +81,9 @@ pub fn validate_request(
                 ));
             }
             Capability::ThinkingBlocks => {
-                return Err(ProtocolError::unsupported(
-                    "thinking_blocks",
-                    request.source.as_str(),
-                    target.as_str(),
-                ));
+                warnings.push(
+                    "thinking blocks and signatures are dropped; the thinking budget is approximated as reasoning effort",
+                );
             }
             Capability::Audio => {
                 return Err(ProtocolError::unsupported(

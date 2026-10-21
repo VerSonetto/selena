@@ -62,6 +62,14 @@ pub fn decode_request(value: &Value) -> Result<CanonicalRequest, ProtocolError> 
             .get("budget_tokens")
             .and_then(Value::as_u64)
             .and_then(|value| u32::try_from(value).ok());
+        if request.reasoning.thinking_type.as_deref() == Some("enabled")
+            && request.reasoning.effort.is_none()
+        {
+            request.reasoning.effort = request
+                .reasoning
+                .budget_tokens
+                .map(|budget| reasoning_effort_for_budget(budget).to_string());
+        }
         request.mark(Capability::ThinkingBlocks);
     }
     request.temperature = optional_f64(object, "temperature");
@@ -1181,6 +1189,14 @@ pub fn decode_usage(value: Option<&Value>) -> Usage {
             .and_then(|details| details.get("thinking_tokens"))
             .and_then(Value::as_u64),
         server_tool_use: usage.get("server_tool_use").cloned(),
+    }
+}
+
+fn reasoning_effort_for_budget(budget_tokens: u32) -> &'static str {
+    match budget_tokens {
+        0..=2048 => "low",
+        2049..=8192 => "medium",
+        _ => "high",
     }
 }
 
