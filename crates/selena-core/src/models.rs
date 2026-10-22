@@ -73,23 +73,6 @@ pub struct CreateProviderKey {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
-pub struct Route {
-    pub id: String,
-    pub model_alias: String,
-    pub provider_id: String,
-    pub upstream_model: String,
-    pub enabled: bool,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CreateRoute {
-    pub model_alias: String,
-    pub provider_id: String,
-    pub upstream_model: String,
-}
-
-#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct ClientKey {
     pub id: String,
     pub name: String,
@@ -145,7 +128,9 @@ pub struct RequestLogRow {
     pub ttft_ms: Option<i64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub cached_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub reasoning_tokens: Option<i64>,
     pub conversion_warnings: String,
     pub upstream_request_id: Option<String>,
@@ -169,11 +154,41 @@ pub struct NewRequestLog {
     pub ttft_ms: Option<i64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
     pub cached_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub reasoning_tokens: Option<i64>,
     pub conversion_warnings: Vec<String>,
     pub upstream_request_id: Option<String>,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestLogCompletion {
+    pub status_code: i64,
+    pub latency_ms: i64,
+    pub ttft_ms: Option<i64>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub cached_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub conversion_warnings: Vec<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct RequestLogQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub protocol: Option<String>,
+    pub status: Option<String>,
+    pub provider_id: Option<String>,
+    pub stream: Option<bool>,
+    pub search: Option<String>,
+    pub days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -223,7 +238,6 @@ pub struct Overview {
     pub port: u16,
     pub providers: i64,
     pub enabled_providers: i64,
-    pub routes: i64,
     pub client_keys: i64,
     pub requests_today: i64,
     pub errors_today: i64,
@@ -231,6 +245,71 @@ pub struct Overview {
     pub output_tokens_today: i64,
     pub avg_latency_ms: f64,
     pub recent_requests: Vec<RequestLogRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct UsageSummary {
+    pub requests: i64,
+    pub errors: i64,
+    pub usage_requests: i64,
+    pub stream_requests: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cached_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub avg_latency_ms: f64,
+    pub p50_latency_ms: i64,
+    pub p95_latency_ms: i64,
+    pub avg_ttft_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageBucket {
+    pub key: String,
+    pub label: String,
+    pub requests: i64,
+    pub errors: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cached_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub avg_latency_ms: f64,
+    pub avg_ttft_ms: Option<f64>,
+}
+
+impl UsageBucket {
+    pub fn empty(key: impl Into<String>) -> Self {
+        let key = key.into();
+        Self {
+            label: key.clone(),
+            key,
+            requests: 0,
+            errors: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            cached_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            avg_latency_ms: 0.0,
+            avg_ttft_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageReport {
+    pub days: i64,
+    pub since: i64,
+    pub summary: UsageSummary,
+    pub daily: Vec<UsageBucket>,
+    pub by_provider: Vec<UsageBucket>,
+    pub by_model: Vec<UsageBucket>,
+    pub by_protocol: Vec<UsageBucket>,
 }
 
 #[derive(Debug, Clone)]

@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 use selena_core::Core;
-use selena_core::models::{ClientKey, Overview, Provider, RequestLogRow, Route};
+use selena_core::models::{ClientKey, Overview, Provider, RequestLogRow};
 use selena_core::runtime::RuntimeInfo;
 use std::io::{IsTerminal, Stdout};
 use std::time::{Duration, Instant};
@@ -24,20 +24,12 @@ const CORAL: Color = Color::Rgb(217, 99, 79);
 const TEAL: Color = Color::Rgb(44, 110, 104);
 const LINE: Color = Color::Rgb(227, 216, 200);
 
-const TABS: [&str; 6] = [
-    "Overview",
-    "Providers",
-    "Routes",
-    "Client keys",
-    "Logs",
-    "Settings",
-];
+const TABS: [&str; 5] = ["Overview", "Providers", "Client keys", "Logs", "Settings"];
 
 #[derive(Default)]
 struct TuiData {
     overview: Option<Overview>,
     providers: Vec<Provider>,
-    routes: Vec<Route>,
     client_keys: Vec<ClientKey>,
     logs: Vec<RequestLogRow>,
     error: Option<String>,
@@ -56,8 +48,8 @@ pub async fn run(core: std::sync::Arc<Core>, runtime: RuntimeInfo) -> Result<()>
         println!("Selena {} — {}", runtime.version, runtime.base_url());
         if let Some(overview) = data.overview {
             println!(
-                "providers: {}  routes: {}  requests today: {}  errors today: {}",
-                overview.providers, overview.routes, overview.requests_today, overview.errors_today
+                "providers: {}  requests today: {}  errors today: {}",
+                overview.providers, overview.requests_today, overview.errors_today
             );
         }
         println!("web admin: {}", runtime.admin_url());
@@ -115,7 +107,6 @@ async fn event_loop(
                 KeyCode::Char('3') => app.tab = 2,
                 KeyCode::Char('4') => app.tab = 3,
                 KeyCode::Char('5') => app.tab = 4,
-                KeyCode::Char('6') => app.tab = 5,
                 KeyCode::Char('r') => {
                     *data = load(core).await;
                     *last_refresh = Instant::now();
@@ -149,10 +140,6 @@ async fn load(core: &std::sync::Arc<Core>) -> TuiData {
         Ok(providers) => data.providers = providers,
         Err(error) => data.error = Some(error.to_string()),
     }
-    match core.store.list_routes().await {
-        Ok(routes) => data.routes = routes,
-        Err(error) => data.error = Some(error.to_string()),
-    }
     match core.store.list_client_keys().await {
         Ok(keys) => data.client_keys = keys,
         Err(error) => data.error = Some(error.to_string()),
@@ -183,10 +170,9 @@ fn render(frame: &mut Frame, app: &App, data: &TuiData) {
     match app.tab {
         0 => render_overview(frame, chunks[2], data),
         1 => render_providers(frame, chunks[2], data),
-        2 => render_routes(frame, chunks[2], data),
-        3 => render_client_keys(frame, chunks[2], data),
-        4 => render_logs(frame, chunks[2], data),
-        5 => render_settings(frame, chunks[2], app, data),
+        2 => render_client_keys(frame, chunks[2], data),
+        3 => render_logs(frame, chunks[2], data),
+        4 => render_settings(frame, chunks[2], app, data),
         _ => {}
     }
     let footer = Paragraph::new(Line::from(vec![
@@ -423,50 +409,6 @@ fn render_providers(frame: &mut Frame, area: Rect, data: &TuiData) {
     frame.render_widget(table, area);
 }
 
-fn render_routes(frame: &mut Frame, area: Rect, data: &TuiData) {
-    if data.routes.is_empty() {
-        frame.render_widget(
-            Paragraph::new("  No routes. Add a model alias or use `provider/model` directly.")
-                .block(panel("Routes"))
-                .style(Style::default().bg(SURFACE).fg(MUTED))
-                .wrap(Wrap { trim: false }),
-            area,
-        );
-        return;
-    }
-    let rows = data.routes.iter().map(|route| {
-        let provider = data
-            .providers
-            .iter()
-            .find(|provider| provider.id == route.provider_id)
-            .map_or_else(
-                || route.provider_id.clone(),
-                |provider| provider.name.clone(),
-            );
-        Row::new(vec![
-            Cell::from(route.model_alias.clone()),
-            Cell::from(provider),
-            Cell::from(route.upstream_model.clone()),
-        ])
-        .style(Style::default().fg(INK).bg(SURFACE))
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(30),
-            Constraint::Length(32),
-            Constraint::Min(24),
-        ],
-    )
-    .header(
-        Row::new(vec!["Model alias", "Provider", "Upstream model"])
-            .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD)),
-    )
-    .block(panel("Routes"))
-    .style(Style::default().bg(SURFACE));
-    frame.render_widget(table, area);
-}
-
 fn render_client_keys(frame: &mut Frame, area: Rect, data: &TuiData) {
     if data.client_keys.is_empty() {
         frame.render_widget(
@@ -578,13 +520,6 @@ fn render_settings(frame: &mut Frame, area: Rect, app: &App, data: &TuiData) {
             Span::styled("  Providers     ", Style::default().fg(MUTED)),
             Span::styled(
                 format!("{} configured", data.providers.len()),
-                Style::default().fg(INK),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Routes        ", Style::default().fg(MUTED)),
-            Span::styled(
-                format!("{} configured", data.routes.len()),
                 Style::default().fg(INK),
             ),
         ]),

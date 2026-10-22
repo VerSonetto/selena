@@ -129,7 +129,7 @@ export function Providers() {
               onToggle={(enabled) => toggle.mutate({ id: entry.provider.id, enabled })}
               onTest={() => test.mutate(entry.provider.id)}
               onDelete={() => {
-                if (window.confirm(`删除 Provider「${entry.provider.name}」及其 Key 和路由？`)) {
+                if (window.confirm(`删除 Provider「${entry.provider.name}」及其 Key？`)) {
                   remove.mutate(entry.provider.id);
                 }
               }}
@@ -144,7 +144,7 @@ export function Providers() {
         onCreated={() => {
           setCreateOpen(false);
           refresh();
-          setNotice({ tone: "success", message: "Provider 已添加。下一步：添加 Key 或配置模型路由。" });
+          setNotice({ tone: "success", message: "Provider 已添加。下一步：添加至少一个 Key 即可调用。" });
         }}
       />
       {keyTarget && (

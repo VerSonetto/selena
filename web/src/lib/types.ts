@@ -32,15 +32,6 @@ export interface ProviderKey {
   created_at: number;
 }
 
-export interface Route {
-  id: string;
-  model_alias: string;
-  provider_id: string;
-  upstream_model: string;
-  enabled: boolean;
-  created_at: number;
-}
-
 export interface ClientKey {
   id: string;
   name: string;
@@ -72,11 +63,32 @@ export interface RequestLog {
   ttft_ms: number | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  total_tokens: number | null;
   cached_tokens: number | null;
+  cache_write_tokens: number | null;
   reasoning_tokens: number | null;
   conversion_warnings: string;
   upstream_request_id: string | null;
   error_message: string | null;
+}
+
+export interface RequestLogPage {
+  data: RequestLog[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export interface RequestLogQuery {
+  limit?: number;
+  offset?: number;
+  protocol?: string;
+  status?: string;
+  provider_id?: string;
+  stream?: boolean;
+  search?: string;
+  days?: number;
 }
 
 export interface ProviderModel {
@@ -120,7 +132,6 @@ export interface Overview {
   port: number;
   providers: number;
   enabled_providers: number;
-  routes: number;
   client_keys: number;
   requests_today: number;
   errors_today: number;
@@ -130,14 +141,46 @@ export interface Overview {
   recent_requests: RequestLog[];
 }
 
-export interface UsagePoint {
-  day: string;
+export interface UsageBucket {
+  key: string;
+  label: string;
   requests: number;
   errors: number;
   input_tokens: number;
   output_tokens: number;
+  total_tokens: number;
   cached_tokens: number;
+  cache_write_tokens: number;
   reasoning_tokens: number;
+  avg_latency_ms: number;
+  avg_ttft_ms: number | null;
+}
+
+export interface UsageSummary {
+  requests: number;
+  errors: number;
+  usage_requests: number;
+  stream_requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cached_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  avg_latency_ms: number;
+  p50_latency_ms: number;
+  p95_latency_ms: number;
+  avg_ttft_ms: number | null;
+}
+
+export interface UsageReport {
+  days: number;
+  since: number;
+  summary: UsageSummary;
+  daily: UsageBucket[];
+  by_provider: UsageBucket[];
+  by_model: UsageBucket[];
+  by_protocol: UsageBucket[];
 }
 
 export interface Settings {

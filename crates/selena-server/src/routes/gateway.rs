@@ -1,5 +1,6 @@
 use crate::error::{message_error, protocol_error};
 use crate::sse_bridge;
+use crate::stream_meter::{MeteredStream, StreamMeter};
 use crate::{AppState, auth};
 use axum::body::{Body, Bytes};
 use axum::extract::State;
@@ -79,14 +80,68 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
     } else {
         let canonical = match decode_request(ingress, &body_json) {
             Ok(canonical) => canonical,
-            Err(error) => return protocol_error(ingress, error),
+            Err(error) => {
+                let _ = log_request(
+                    &state,
+                    &LogContext {
+                        ingress,
+                        egress: upstream_protocol,
+                        provider_id: Some(resolved.provider.id.clone()),
+                        provider_name: Some(resolved.provider.name.clone()),
+                        model_requested: model.to_string(),
+                        model_upstream: resolved.upstream_model.clone(),
+                        client_key_id: identity.client_key_id.clone(),
+                        stream,
+                        conversion_mode: "converted",
+                        warnings: Vec::new(),
+                        started,
+                    },
+                    StatusCode::from_u16(error.status).unwrap_or(StatusCode::BAD_REQUEST),
+                    Usage::default(),
+                    error
+                        .code
+                        .clone()
+                        .or_else(|| Some("invalid_request".to_string())),
+                    Some(error.message.clone()),
+                    None,
+                )
+                .await;
+                return protocol_error(ingress, error);
+            }
         };
         match convert::request_to(&canonical, upstream_protocol) {
             Ok((value, conversion_warnings)) => {
                 warnings = conversion_warnings.0;
                 value
             }
-            Err(error) => return protocol_error(ingress, error),
+            Err(error) => {
+                let _ = log_request(
+                    &state,
+                    &LogContext {
+                        ingress,
+                        egress: upstream_protocol,
+                        provider_id: Some(resolved.provider.id.clone()),
+                        provider_name: Some(resolved.provider.name.clone()),
+                        model_requested: model.to_string(),
+                        model_upstream: resolved.upstream_model.clone(),
+                        client_key_id: identity.client_key_id.clone(),
+                        stream,
+                        conversion_mode: "converted",
+                        warnings: Vec::new(),
+                        started,
+                    },
+                    StatusCode::from_u16(error.status).unwrap_or(StatusCode::BAD_REQUEST),
+                    Usage::default(),
+                    error
+                        .code
+                        .clone()
+                        .or_else(|| Some("conversion_error".to_string())),
+                    Some(error.message.clone()),
+                    None,
+                )
+                .await;
+                return protocol_error(ingress, error);
+            }
         }
     };
 
@@ -102,8 +157,9 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
     {
         Ok(response) => response,
         Err(error) => {
+            let message = error.to_string();
             let response = core_error(ingress, error);
-            log_request(
+            let _ = log_request(
                 &state,
                 &LogContext {
                     ingress,
@@ -125,7 +181,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
                 StatusCode::BAD_GATEWAY,
                 Usage::default(),
                 Some("upstream_error".to_string()),
-                Some("upstream request failed".to_string()),
+                Some(message),
                 None,
             )
             .await;
@@ -156,7 +212,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
                 bytes.clone(),
             )
                 .into_response();
-            log_request(
+            let _ = log_request(
                 &state,
                 &LogContext {
                     ingress,
@@ -181,7 +237,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
             return response;
         }
         let error = parse_upstream_error(upstream_protocol, status.as_u16(), &bytes);
-        log_request(
+        let _ = log_request(
             &state,
             &LogContext {
                 ingress,
@@ -211,7 +267,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
 
     if stream && content_type.contains("text/event-stream") {
         if same_protocol {
-            log_request(
+            let log_id = log_request(
                 &state,
                 &LogContext {
                     ingress,
@@ -223,7 +279,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
                     client_key_id: identity.client_key_id.clone(),
                     stream: true,
                     conversion_mode: "passthrough",
-                    warnings,
+                    warnings: warnings.clone(),
                     started,
                 },
                 StatusCode::OK,
@@ -233,10 +289,21 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
                 upstream_request_id,
             )
             .await;
-            return sse_response(Body::from_stream(upstream.bytes_stream()));
+            let meter = StreamMeter::new(
+                state.core.clone(),
+                log_id.unwrap_or_default(),
+                started,
+                warnings,
+            );
+            let stream = MeteredStream::passthrough(
+                Box::pin(upstream.bytes_stream()),
+                upstream_protocol,
+                meter,
+            );
+            return sse_response(Body::from_stream(stream));
         }
 
-        log_request(
+        let log_id = log_request(
             &state,
             &LogContext {
                 ingress,
@@ -248,7 +315,7 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
                 client_key_id: identity.client_key_id.clone(),
                 stream: true,
                 conversion_mode: "converted",
-                warnings,
+                warnings: warnings.clone(),
                 started,
             },
             StatusCode::OK,
@@ -258,23 +325,56 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
             upstream_request_id,
         )
         .await;
-        return sse_bridge::bridge_response(upstream, ingress, upstream_protocol, include_usage);
+        let meter = StreamMeter::new(
+            state.core.clone(),
+            log_id.unwrap_or_default(),
+            started,
+            warnings,
+        );
+        return sse_bridge::bridge_response(
+            upstream,
+            ingress,
+            upstream_protocol,
+            include_usage,
+            meter,
+        );
     }
 
     let bytes = match upstream.bytes().await {
         Ok(bytes) => bytes,
         Err(error) => {
-            return protocol_error(
-                ingress,
-                ProtocolError::stream(format!("failed to read upstream response: {error}")),
-            );
+            let failure =
+                ProtocolError::stream(format!("failed to read upstream response: {error}"));
+            let _ = log_request(
+                &state,
+                &LogContext {
+                    ingress,
+                    egress: upstream_protocol,
+                    provider_id: Some(resolved.provider.id.clone()),
+                    provider_name: Some(resolved.provider.name.clone()),
+                    model_requested: model.to_string(),
+                    model_upstream: resolved.upstream_model.clone(),
+                    client_key_id: identity.client_key_id.clone(),
+                    stream,
+                    conversion_mode: "passthrough",
+                    warnings: Vec::new(),
+                    started,
+                },
+                StatusCode::BAD_GATEWAY,
+                Usage::default(),
+                Some("upstream_read_error".to_string()),
+                Some(failure.message.clone()),
+                upstream_request_id.clone(),
+            )
+            .await;
+            return protocol_error(ingress, failure);
         }
     };
     if same_protocol {
         let usage = decode_response(upstream_protocol, &bytes)
             .map(|response| response.usage)
             .unwrap_or_default();
-        log_request(
+        let _ = log_request(
             &state,
             &LogContext {
                 ingress,
@@ -301,14 +401,62 @@ async fn gateway(state: AppState, headers: HeaderMap, body: Bytes, ingress: Prot
 
     let canonical_response = match decode_response(upstream_protocol, &bytes) {
         Ok(response) => response,
-        Err(error) => return protocol_error(ingress, error),
+        Err(error) => {
+            let _ = log_request(
+                &state,
+                &LogContext {
+                    ingress,
+                    egress: upstream_protocol,
+                    provider_id: Some(resolved.provider.id.clone()),
+                    provider_name: Some(resolved.provider.name.clone()),
+                    model_requested: model.to_string(),
+                    model_upstream: resolved.upstream_model.clone(),
+                    client_key_id: identity.client_key_id.clone(),
+                    stream: false,
+                    conversion_mode: "converted",
+                    warnings: warnings.clone(),
+                    started,
+                },
+                StatusCode::BAD_GATEWAY,
+                Usage::default(),
+                Some("upstream_decode_error".to_string()),
+                Some(error.message.clone()),
+                upstream_request_id.clone(),
+            )
+            .await;
+            return protocol_error(ingress, error);
+        }
     };
     let (value, conversion_warnings) = match convert::response_to(&canonical_response, ingress) {
         Ok(result) => result,
-        Err(error) => return protocol_error(ingress, error),
+        Err(error) => {
+            let _ = log_request(
+                &state,
+                &LogContext {
+                    ingress,
+                    egress: upstream_protocol,
+                    provider_id: Some(resolved.provider.id.clone()),
+                    provider_name: Some(resolved.provider.name.clone()),
+                    model_requested: model.to_string(),
+                    model_upstream: resolved.upstream_model.clone(),
+                    client_key_id: identity.client_key_id.clone(),
+                    stream: false,
+                    conversion_mode: "converted",
+                    warnings: warnings.clone(),
+                    started,
+                },
+                StatusCode::BAD_GATEWAY,
+                canonical_response.usage.clone(),
+                Some("response_conversion_error".to_string()),
+                Some(error.message.clone()),
+                upstream_request_id.clone(),
+            )
+            .await;
+            return protocol_error(ingress, error);
+        }
     };
     warnings.extend(conversion_warnings.0);
-    log_request(
+    let _ = log_request(
         &state,
         &LogContext {
             ingress,
@@ -459,7 +607,14 @@ async fn log_request(
     error_code: Option<String>,
     error_message: Option<String>,
     upstream_request_id: Option<String>,
-) {
+) -> Option<String> {
+    let total_tokens = usage.total_tokens.or_else(|| {
+        if usage.input_tokens.is_some() || usage.output_tokens.is_some() {
+            Some(usage.input_tokens.unwrap_or(0) + usage.output_tokens.unwrap_or(0))
+        } else {
+            None
+        }
+    });
     let log = NewRequestLog {
         ingress_protocol: context.ingress.as_str().to_string(),
         egress_protocol: context.egress.as_str().to_string(),
@@ -476,13 +631,19 @@ async fn log_request(
         ttft_ms: None,
         input_tokens: usage.input_tokens.map(|value| value as i64),
         output_tokens: usage.output_tokens.map(|value| value as i64),
+        total_tokens: total_tokens.map(|value| value as i64),
         cached_tokens: usage.cached_tokens.map(|value| value as i64),
+        cache_write_tokens: usage.cache_write_tokens.map(|value| value as i64),
         reasoning_tokens: usage.reasoning_tokens.map(|value| value as i64),
         conversion_warnings: context.warnings.clone(),
         upstream_request_id,
         error_message: error_message.map(|message| message.chars().take(2000).collect()),
     };
-    if let Err(error) = state.core.record_request(log).await {
-        tracing::warn!("failed to record request: {error}");
+    match state.core.record_request(log).await {
+        Ok(id) => Some(id),
+        Err(error) => {
+            tracing::warn!("failed to record request: {error}");
+            None
+        }
     }
 }

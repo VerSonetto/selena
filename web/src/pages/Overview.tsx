@@ -41,7 +41,7 @@ const endpointMeta: Array<{ protocol: Protocol; caption: string; tone: string }>
 export function Overview() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview, refetchInterval: 5000 });
   const providers = useQuery({ queryKey: ["providers"], queryFn: api.providers });
-  const usage = useQuery({ queryKey: ["usage"], queryFn: api.usage });
+  const usage = useQuery({ queryKey: ["usage"], queryFn: () => api.usage() });
   const requests = useQuery({ queryKey: ["requests", 8], queryFn: () => api.requests(8) });
 
   if (overview.isLoading) return <Spinner label="正在读取 Selena 状态" />;
@@ -61,7 +61,7 @@ export function Overview() {
     ? ((data.requests_today - data.errors_today) / data.requests_today) * 100
     : 100;
   const providerEntries = providers.data?.data ?? [];
-  const usageData = usage.data?.data ?? [];
+  const usageData = usage.data?.daily ?? [];
   const recent = requests.data?.data ?? data.recent_requests;
 
   return (
@@ -187,7 +187,7 @@ export function Overview() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke="#e3d8c8" strokeDasharray="2 6" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: "#7b7166", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="key" tick={{ fill: "#7b7166", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={{
                       background: "#fffbf3",

@@ -96,7 +96,7 @@ export function SettingsPage({
             <Globe2 size={18} className="panel-icon" />
           </div>
           <div className="settings-fields">
-            <Field label="默认 Provider" hint="未命中别名或 provider/model 前缀时使用。">
+            <Field label="默认 Provider" hint="未使用 provider/model 前缀时使用。">
               <Select value={currentDefault} onChange={setDefaultProvider}>
                 <option value="">— 未设置 —</option>
                 {entries.map((entry) => (

@@ -4,7 +4,7 @@ use crate::secrets::SecretBox;
 use anyhow::{Context, Result};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
@@ -287,51 +287,6 @@ impl Store {
         Ok(())
     }
 
-    pub async fn list_routes(&self) -> Result<Vec<Route>> {
-        Ok(
-            sqlx::query_as::<_, Route>("SELECT * FROM routes ORDER BY model_alias ASC")
-                .fetch_all(&self.pool)
-                .await?,
-        )
-    }
-
-    pub async fn create_route(&self, input: CreateRoute) -> Result<Route> {
-        let id = uuid::Uuid::now_v7().simple().to_string();
-        sqlx::query(
-            "INSERT INTO routes (id,model_alias,provider_id,upstream_model,enabled,created_at) VALUES (?,?,?,?,1,?)",
-        )
-        .bind(&id)
-        .bind(input.model_alias)
-        .bind(input.provider_id)
-        .bind(input.upstream_model)
-        .bind(now())
-        .execute(&self.pool)
-        .await?;
-        Ok(
-            sqlx::query_as::<_, Route>("SELECT * FROM routes WHERE id=?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?,
-        )
-    }
-
-    pub async fn delete_route(&self, id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM routes WHERE id=?")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn find_route(&self, alias: &str) -> Result<Option<Route>> {
-        Ok(sqlx::query_as::<_, Route>(
-            "SELECT * FROM routes WHERE lower(model_alias)=lower(?) AND enabled=1 LIMIT 1",
-        )
-        .bind(alias)
-        .fetch_optional(&self.pool)
-        .await?)
-    }
-
     pub async fn list_client_keys(&self) -> Result<Vec<ClientKey>> {
         Ok(sqlx::query_as::<_, ClientKey>(
             "SELECT id,name,key_prefix,enabled,rate_limit_rpm,created_at FROM client_keys ORDER BY created_at ASC",
@@ -423,9 +378,9 @@ impl Store {
         sqlx::query(
             "INSERT INTO request_logs
              (id,ts,ingress_protocol,egress_protocol,provider_id,provider_name,model_requested,model_upstream,client_key_id,
-              status_code,error_code,stream,conversion_mode,latency_ms,ttft_ms,input_tokens,output_tokens,cached_tokens,
-              reasoning_tokens,conversion_warnings,upstream_request_id,error_message)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              status_code,error_code,stream,conversion_mode,latency_ms,ttft_ms,input_tokens,output_tokens,total_tokens,
+              cached_tokens,cache_write_tokens,reasoning_tokens,conversion_warnings,upstream_request_id,error_message)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(&id)
         .bind(now())
@@ -444,7 +399,9 @@ impl Store {
         .bind(log.ttft_ms)
         .bind(log.input_tokens)
         .bind(log.output_tokens)
+        .bind(log.total_tokens)
         .bind(log.cached_tokens)
+        .bind(log.cache_write_tokens)
         .bind(log.reasoning_tokens)
         .bind(serde_json::to_string(&log.conversion_warnings)?)
         .bind(log.upstream_request_id)
@@ -452,6 +409,30 @@ impl Store {
         .execute(&self.pool)
         .await?;
         Ok(id)
+    }
+
+    pub async fn update_request_log(&self, id: &str, update: RequestLogCompletion) -> Result<()> {
+        sqlx::query(
+            "UPDATE request_logs SET status_code=?, latency_ms=?, ttft_ms=?, input_tokens=?, output_tokens=?,
+             total_tokens=?, cached_tokens=?, cache_write_tokens=?, reasoning_tokens=?, conversion_warnings=?,
+             error_code=?, error_message=? WHERE id=?",
+        )
+        .bind(update.status_code)
+        .bind(update.latency_ms)
+        .bind(update.ttft_ms)
+        .bind(update.input_tokens)
+        .bind(update.output_tokens)
+        .bind(update.total_tokens)
+        .bind(update.cached_tokens)
+        .bind(update.cache_write_tokens)
+        .bind(update.reasoning_tokens)
+        .bind(serde_json::to_string(&update.conversion_warnings)?)
+        .bind(update.error_code)
+        .bind(update.error_message)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn list_request_logs(&self, limit: i64, offset: i64) -> Result<Vec<RequestLogRow>> {
@@ -464,6 +445,105 @@ impl Store {
         .await?)
     }
 
+    pub async fn query_request_logs(
+        &self,
+        query: &RequestLogQuery,
+    ) -> Result<(Vec<RequestLogRow>, i64)> {
+        let since = query.days.map(|days| now() - days.clamp(1, 365) * 86_400);
+        let mut count = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM request_logs WHERE 1=1");
+        add_log_filters(&mut count, query, since);
+        let total = count
+            .build_query_scalar::<i64>()
+            .fetch_one(&self.pool)
+            .await?;
+
+        let mut rows = QueryBuilder::<Sqlite>::new("SELECT * FROM request_logs WHERE 1=1");
+        add_log_filters(&mut rows, query, since);
+        rows.push(" ORDER BY ts DESC LIMIT ")
+            .push_bind(query.limit.unwrap_or(50).clamp(1, 200))
+            .push(" OFFSET ")
+            .push_bind(query.offset.unwrap_or(0).max(0));
+        let rows = rows
+            .build_query_as::<RequestLogRow>()
+            .fetch_all(&self.pool)
+            .await?;
+        Ok((rows, total))
+    }
+
+    pub async fn usage_report(&self, days: i64) -> Result<UsageReport> {
+        let days = days.clamp(1, 90);
+        let since = now() - days * 86_400;
+        let (p50_latency_ms, p95_latency_ms) = latency_percentiles(&self.pool, since).await?;
+        let mut summary = usage_summary(&self.pool, since).await?;
+        summary.p50_latency_ms = p50_latency_ms;
+        summary.p95_latency_ms = p95_latency_ms;
+
+        let buckets = usage_buckets(
+            &self.pool,
+            since,
+            "date(ts, 'unixepoch', 'localtime')",
+            "date(ts, 'unixepoch', 'localtime')",
+            "date(ts, 'unixepoch', 'localtime')",
+            "bucket_key ASC",
+            90,
+        )
+        .await?;
+        let existing = buckets
+            .into_iter()
+            .map(|bucket| (bucket.key.clone(), bucket))
+            .collect::<std::collections::HashMap<_, _>>();
+        let today = chrono::Local::now().date_naive();
+        let daily = (0..days)
+            .rev()
+            .map(|offset| {
+                let key = (today - chrono::Duration::days(offset))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                existing
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| UsageBucket::empty(key))
+            })
+            .collect();
+
+        Ok(UsageReport {
+            days,
+            since,
+            summary,
+            daily,
+            by_provider: usage_buckets(
+                &self.pool,
+                since,
+                "COALESCE(provider_id, '')",
+                "COALESCE(provider_name, 'unknown')",
+                "provider_id, provider_name",
+                "requests DESC, total_tokens DESC",
+                20,
+            )
+            .await?,
+            by_model: usage_buckets(
+                &self.pool,
+                since,
+                "model_requested",
+                "model_requested",
+                "model_requested",
+                "requests DESC, total_tokens DESC",
+                20,
+            )
+            .await?,
+            by_protocol: usage_buckets(
+                &self.pool,
+                since,
+                "ingress_protocol",
+                "ingress_protocol",
+                "ingress_protocol",
+                "requests DESC",
+                10,
+            )
+            .await?,
+        })
+    }
+
     pub async fn overview(&self, host: &str, port: u16) -> Result<Overview> {
         let providers: i64 = sqlx::query("SELECT COUNT(*) AS count FROM providers")
             .fetch_one(&self.pool)
@@ -474,10 +554,6 @@ impl Store {
                 .fetch_one(&self.pool)
                 .await?
                 .try_get("count")?;
-        let routes: i64 = sqlx::query("SELECT COUNT(*) AS count FROM routes")
-            .fetch_one(&self.pool)
-            .await?
-            .try_get("count")?;
         let client_keys: i64 = sqlx::query("SELECT COUNT(*) AS count FROM client_keys")
             .fetch_one(&self.pool)
             .await?
@@ -500,7 +576,6 @@ impl Store {
             port,
             providers,
             enabled_providers,
-            routes,
             client_keys,
             requests_today: row.try_get("requests")?,
             errors_today: row.try_get("errors")?,
@@ -528,6 +603,142 @@ impl Store {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+}
+
+const USAGE_METRICS: &str = "
+    COUNT(*) AS requests,
+    COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END),0) AS errors,
+    COALESCE(SUM(CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL OR total_tokens IS NOT NULL THEN 1 ELSE 0 END),0) AS usage_requests,
+    COALESCE(SUM(CASE WHEN stream=1 THEN 1 ELSE 0 END),0) AS stream_requests,
+    COALESCE(SUM(input_tokens),0) AS input_tokens,
+    COALESCE(SUM(output_tokens),0) AS output_tokens,
+    COALESCE(SUM(COALESCE(total_tokens, COALESCE(input_tokens,0)+COALESCE(output_tokens,0))),0) AS total_tokens,
+    COALESCE(SUM(cached_tokens),0) AS cached_tokens,
+    COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens,
+    COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens,
+    CAST(COALESCE(AVG(latency_ms),0) AS REAL) AS avg_latency_ms,
+    AVG(CASE WHEN stream=1 AND ttft_ms IS NOT NULL THEN ttft_ms END) AS avg_ttft_ms
+";
+
+async fn usage_summary(pool: &SqlitePool, since: i64) -> Result<UsageSummary> {
+    let sql = format!("SELECT {USAGE_METRICS} FROM request_logs WHERE ts >= ?");
+    let row = sqlx::query(&sql).bind(since).fetch_one(pool).await?;
+    Ok(UsageSummary {
+        requests: row.try_get("requests")?,
+        errors: row.try_get("errors")?,
+        usage_requests: row.try_get("usage_requests")?,
+        stream_requests: row.try_get("stream_requests")?,
+        input_tokens: row.try_get("input_tokens")?,
+        output_tokens: row.try_get("output_tokens")?,
+        total_tokens: row.try_get("total_tokens")?,
+        cached_tokens: row.try_get("cached_tokens")?,
+        cache_write_tokens: row.try_get("cache_write_tokens")?,
+        reasoning_tokens: row.try_get("reasoning_tokens")?,
+        avg_latency_ms: row.try_get("avg_latency_ms")?,
+        p50_latency_ms: 0,
+        p95_latency_ms: 0,
+        avg_ttft_ms: row.try_get("avg_ttft_ms")?,
+    })
+}
+
+async fn usage_buckets(
+    pool: &SqlitePool,
+    since: i64,
+    key: &str,
+    label: &str,
+    group: &str,
+    order: &str,
+    limit: i64,
+) -> Result<Vec<UsageBucket>> {
+    let sql = format!(
+        "SELECT {key} AS bucket_key, {label} AS bucket_label, {USAGE_METRICS}
+         FROM request_logs WHERE ts >= ? GROUP BY {group} ORDER BY {order} LIMIT {limit}"
+    );
+    let rows = sqlx::query(&sql).bind(since).fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            Ok(UsageBucket {
+                key: row.try_get("bucket_key")?,
+                label: row.try_get("bucket_label")?,
+                requests: row.try_get("requests")?,
+                errors: row.try_get("errors")?,
+                input_tokens: row.try_get("input_tokens")?,
+                output_tokens: row.try_get("output_tokens")?,
+                total_tokens: row.try_get("total_tokens")?,
+                cached_tokens: row.try_get("cached_tokens")?,
+                cache_write_tokens: row.try_get("cache_write_tokens")?,
+                reasoning_tokens: row.try_get("reasoning_tokens")?,
+                avg_latency_ms: row.try_get("avg_latency_ms")?,
+                avg_ttft_ms: row.try_get("avg_ttft_ms")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?)
+}
+
+async fn latency_percentiles(pool: &SqlitePool, since: i64) -> Result<(i64, i64)> {
+    let mut values = sqlx::query_scalar::<_, i64>(
+        "SELECT latency_ms FROM request_logs WHERE ts >= ? ORDER BY latency_ms ASC",
+    )
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    if values.is_empty() {
+        return Ok((0, 0));
+    }
+    values.sort_unstable();
+    let pick = |p: usize| {
+        let index = ((values.len() * p).div_ceil(100)).saturating_sub(1);
+        values[index.min(values.len() - 1)]
+    };
+    Ok((pick(50), pick(95)))
+}
+
+fn add_log_filters(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    filter: &RequestLogQuery,
+    since: Option<i64>,
+) {
+    if let Some(since) = since {
+        query.push(" AND ts >= ").push_bind(since);
+    }
+    if let Some(protocol) = &filter.protocol {
+        query
+            .push(" AND ingress_protocol = ")
+            .push_bind(protocol.clone());
+    }
+    match filter.status.as_deref() {
+        Some("error") => {
+            query.push(" AND status_code >= 400");
+        }
+        Some("ok") => {
+            query.push(" AND status_code < 400");
+        }
+        _ => {}
+    }
+    if let Some(provider_id) = &filter.provider_id {
+        query
+            .push(" AND provider_id = ")
+            .push_bind(provider_id.clone());
+    }
+    if let Some(stream) = filter.stream {
+        query.push(" AND stream = ").push_bind(stream);
+    }
+    if let Some(search) = filter.search.as_deref().map(str::trim)
+        && !search.is_empty()
+    {
+        let like = format!("%{search}%");
+        query
+            .push(" AND (model_requested LIKE ")
+            .push_bind(like.clone())
+            .push(" OR model_upstream LIKE ")
+            .push_bind(like.clone())
+            .push(" OR provider_name LIKE ")
+            .push_bind(like.clone())
+            .push(" OR id LIKE ")
+            .push_bind(like)
+            .push(")");
     }
 }
 

@@ -7,16 +7,15 @@
 | POST | `/v1/chat/completions` | OpenAI Chat Completions ingress |
 | POST | `/v1/responses` | OpenAI Responses ingress |
 | POST | `/v1/messages` | Anthropic Messages ingress |
-| GET | `/v1/models` | Model aliases plus `provider/...` entries |
+| GET | `/v1/models` | `provider/...` entries |
 | GET | `/health` | Local liveness |
 
 Authentication accepts `Authorization: Bearer <client-key>` or `x-api-key: <client-key>`. If no client keys exist, loopback requests are allowed for first-run. The admin token is also accepted for the Playground. Client keys with `rate_limit_rpm` are enforced per-key in a one-minute window.
 
-Model routing:
+Model selection:
 
 1. `provider/model` forces a provider; the suffix is the upstream model.
-2. A configured alias maps a client model to a provider and upstream model.
-3. Otherwise the default provider or first enabled provider is used.
+2. Otherwise the default provider or first enabled provider is used.
 
 ### Example: Responses ingress to a Messages provider
 
@@ -48,8 +47,6 @@ All admin routes except `POST /api/auth/login` require `x-selena-admin: <runtime
 | DELETE | `/api/providers/{id}/keys/{key_id}` | Delete key |
 | PATCH | `/api/providers/{id}/keys/{key_id}/enabled` | Enable/disable key |
 | POST | `/api/providers/{id}/test` | Check key availability |
-| GET/POST | `/api/routes` | List/create routes |
-| DELETE | `/api/routes/{id}` | Delete route |
 | GET/POST | `/api/client-keys` | List/create client keys |
 | DELETE | `/api/client-keys/{id}` | Delete client key |
 | PATCH | `/api/client-keys/{id}/enabled` | Enable/disable client key |

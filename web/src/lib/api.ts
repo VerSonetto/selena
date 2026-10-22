@@ -6,10 +6,10 @@ import type {
   Provider,
   ProviderEntry,
   ProviderKey,
-  Route,
-  RequestLog,
+  RequestLogPage,
+  RequestLogQuery,
   Settings,
-  UsagePoint,
+  UsageReport,
 } from "./types";
 
 const TOKEN_KEY = "selena.admin_token";
@@ -108,10 +108,6 @@ export const api = {
     request<{ ok: boolean; message: string; key?: string }>(`/api/providers/${id}/test`, {
       method: "POST",
     }),
-  routes: () => request<{ data: Route[] }>("/api/routes"),
-  createRoute: (input: { model_alias: string; provider_id: string; upstream_model: string }) =>
-    request("/api/routes", { method: "POST", body: JSON.stringify(input) }),
-  deleteRoute: (id: string) => request(`/api/routes/${id}`, { method: "DELETE" }),
   clientKeys: () => request<{ data: ClientKey[] }>("/api/client-keys"),
   createClientKey: (input: { name: string; rate_limit_rpm?: number | null }) =>
     request<CreatedClientKey>("/api/client-keys", {
@@ -124,8 +120,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ enabled }),
     }),
-  requests: (limit = 100) => request<{ data: RequestLog[] }>(`/api/requests?limit=${limit}`),
-  usage: () => request<{ data: UsagePoint[] }>("/api/usage"),
+  requests: (query: RequestLogQuery | number = 50) => {
+    const params = new URLSearchParams();
+    const values = typeof query === "number" ? { limit: query } : query;
+    for (const [key, value] of Object.entries(values)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    return request<RequestLogPage>(`/api/requests?${params.toString()}`);
+  },
+  usage: (days = 7) => request<UsageReport>(`/api/usage?days=${days}`),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (input: {
     default_provider?: string | null;

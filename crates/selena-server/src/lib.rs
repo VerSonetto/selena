@@ -5,6 +5,7 @@ pub mod error;
 pub mod host;
 pub mod routes;
 pub mod sse_bridge;
+pub mod stream_meter;
 
 use axum::extract::State;
 use axum::http::Method;
@@ -49,12 +50,6 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/providers/{id}/test", post(routes::admin::test_provider))
         .route("/model-pool", get(routes::admin::model_pool))
-        .route("/routes", get(routes::admin::list_routes))
-        .route("/routes", post(routes::admin::create_route))
-        .route(
-            "/routes/{id}",
-            axum::routing::delete(routes::admin::delete_route),
-        )
         .route("/client-keys", get(routes::admin::list_client_keys))
         .route("/client-keys", post(routes::admin::create_client_key))
         .route(

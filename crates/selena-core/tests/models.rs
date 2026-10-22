@@ -39,6 +39,50 @@ async fn model_prefix_uses_provider_name() {
 }
 
 #[tokio::test]
+async fn plain_model_uses_default_provider_and_prefix_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(AppConfig::default(), test_paths(dir.path()))
+        .await
+        .unwrap();
+    let alpha = core
+        .store
+        .create_provider(CreateProvider {
+            name: "alpha".to_string(),
+            protocol: "chat_completions".to_string(),
+            base_url: "https://alpha.example.com/v1".to_string(),
+            auth_type: "bearer".to_string(),
+            extra_headers: None,
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
+    let beta = core
+        .store
+        .create_provider(CreateProvider {
+            name: "beta".to_string(),
+            protocol: "anthropic_messages".to_string(),
+            base_url: "https://beta.example.com/v1".to_string(),
+            auth_type: "bearer".to_string(),
+            extra_headers: None,
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
+    core.store
+        .set_setting("default_provider", &beta.id)
+        .await
+        .unwrap();
+
+    let prefixed = core.resolve_route("alpha/gpt-4.1").await.unwrap();
+    assert_eq!(prefixed.provider.id, alpha.id);
+    assert_eq!(prefixed.upstream_model, "gpt-4.1");
+
+    let plain = core.resolve_route("claude-sonnet").await.unwrap();
+    assert_eq!(plain.provider.id, beta.id);
+    assert_eq!(plain.upstream_model, "claude-sonnet");
+}
+
+#[tokio::test]
 async fn provider_name_cannot_contain_slash() {
     let dir = tempfile::tempdir().unwrap();
     let core = Core::new(AppConfig::default(), test_paths(dir.path()))

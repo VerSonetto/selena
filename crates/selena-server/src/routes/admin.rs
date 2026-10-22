@@ -4,21 +4,19 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use selena_core::models::{
-    CreateClientKey, CreateProvider, CreateProviderKey, CreateRoute, UpdateProvider,
+    CreateClientKey, CreateProvider, CreateProviderKey, RequestLogQuery, UpdateProvider,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sqlx::Row;
-
-#[derive(Debug, Deserialize, Default)]
-pub struct Pagination {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
 
 #[derive(Debug, Deserialize, Default)]
 pub struct RefreshQuery {
     pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct UsageQuery {
+    pub days: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,27 +160,6 @@ pub async fn test_provider(
     }
 }
 
-pub async fn list_routes(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let routes = state.core.store.list_routes().await?;
-    Ok(Json(json!({"data": routes})))
-}
-
-pub async fn create_route(
-    State(state): State<AppState>,
-    Json(input): Json<CreateRoute>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let route = state.core.store.create_route(input).await?;
-    Ok((StatusCode::CREATED, Json(json!(route))))
-}
-
-pub async fn delete_route(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    state.core.store.delete_route(&id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 pub async fn list_client_keys(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let keys = state.core.store.list_client_keys().await?;
     Ok(Json(json!({"data": keys})))
@@ -219,49 +196,28 @@ pub async fn set_client_key_enabled(
 
 pub async fn list_requests(
     State(state): State<AppState>,
-    Query(pagination): Query<Pagination>,
+    Query(query): Query<RequestLogQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let logs = state
-        .core
-        .store
-        .list_request_logs(
-            pagination.limit.unwrap_or(50),
-            pagination.offset.unwrap_or(0),
-        )
-        .await?;
-    Ok(Json(json!({"data": logs})))
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let (logs, total) = state.core.store.query_request_logs(&query).await?;
+    Ok(Json(json!({
+        "data": logs,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    })))
 }
 
-pub async fn usage(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let since = chrono::Utc::now().timestamp() - 7 * 86_400;
-    let rows = sqlx::query(
-        "SELECT date(ts, 'unixepoch') AS day,
-                COUNT(*) AS requests,
-                COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END),0) AS errors,
-                COALESCE(SUM(input_tokens),0) AS input_tokens,
-                COALESCE(SUM(output_tokens),0) AS output_tokens,
-                COALESCE(SUM(cached_tokens),0) AS cached_tokens,
-                COALESCE(SUM(reasoning_tokens),0) AS reasoning_tokens
-         FROM request_logs WHERE ts >= ? GROUP BY day ORDER BY day ASC",
-    )
-    .bind(since)
-    .fetch_all(state.core.store.pool())
-    .await?;
-    let data = rows
-        .into_iter()
-        .map(|row| {
-            json!({
-                "day": row.get::<String, _>("day"),
-                "requests": row.get::<i64, _>("requests"),
-                "errors": row.get::<i64, _>("errors"),
-                "input_tokens": row.get::<i64, _>("input_tokens"),
-                "output_tokens": row.get::<i64, _>("output_tokens"),
-                "cached_tokens": row.get::<i64, _>("cached_tokens"),
-                "reasoning_tokens": row.get::<i64, _>("reasoning_tokens"),
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(Json(json!({"data": data})))
+pub async fn usage(
+    State(state): State<AppState>,
+    Query(query): Query<UsageQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let report = state.core.usage_report(query.days.unwrap_or(7)).await?;
+    Ok(Json(
+        serde_json::to_value(report).map_err(|error| ApiError::internal(error.to_string()))?,
+    ))
 }
 
 pub async fn get_settings(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

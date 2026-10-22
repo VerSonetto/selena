@@ -1,12 +1,12 @@
 use selena_core::db::Database;
 use selena_core::models::{
-    CreateClientKey, CreateProvider, CreateProviderKey, CreateRoute, NewRequestLog,
+    CreateClientKey, CreateProvider, CreateProviderKey, NewRequestLog, RequestLogCompletion,
 };
 use selena_core::secrets::SecretBox;
 use selena_core::store::Store;
 
 #[tokio::test]
-async fn provider_key_route_and_client_key_flow() {
+async fn provider_key_and_client_key_flow() {
     let dir = tempfile::tempdir().unwrap();
     let database = Database::connect(&dir.path().join("selena.db"))
         .await
@@ -45,25 +45,6 @@ async fn provider_key_route_and_client_key_flow() {
         .unwrap();
     assert_eq!(selected.1, "sk-test-secret-123456");
 
-    let route = store
-        .create_route(CreateRoute {
-            model_alias: "my-model".to_string(),
-            provider_id: provider.id.clone(),
-            upstream_model: "upstream-model".to_string(),
-        })
-        .await
-        .unwrap();
-    assert_eq!(route.model_alias, "my-model");
-    assert_eq!(
-        store
-            .find_route("MY-MODEL")
-            .await
-            .unwrap()
-            .unwrap()
-            .provider_id,
-        provider.id
-    );
-
     let client = store
         .create_client_key(CreateClientKey {
             name: "laptop".to_string(),
@@ -97,13 +78,15 @@ async fn provider_key_route_and_client_key_flow() {
             client_key_id: Some(client.id.clone()),
             status_code: 200,
             error_code: None,
-            stream: false,
+            stream: true,
             conversion_mode: "passthrough".to_string(),
             latency_ms: 12,
             ttft_ms: None,
             input_tokens: Some(10),
             output_tokens: Some(5),
+            total_tokens: Some(15),
             cached_tokens: Some(2),
+            cache_write_tokens: Some(1),
             reasoning_tokens: Some(0),
             conversion_warnings: vec![],
             upstream_request_id: Some("req_test".to_string()),
@@ -118,4 +101,35 @@ async fn provider_key_route_and_client_key_flow() {
     assert_eq!(overview.input_tokens_today, 10);
     assert_eq!(overview.output_tokens_today, 5);
     assert_eq!(overview.recent_requests.len(), 1);
+
+    let logs = store.list_request_logs(1, 0).await.unwrap();
+    store
+        .update_request_log(
+            &logs[0].id,
+            RequestLogCompletion {
+                status_code: 200,
+                latency_ms: 240,
+                ttft_ms: Some(80),
+                input_tokens: Some(12),
+                output_tokens: Some(7),
+                total_tokens: Some(19),
+                cached_tokens: Some(3),
+                cache_write_tokens: Some(2),
+                reasoning_tokens: Some(4),
+                conversion_warnings: vec!["stream usage observed".to_string()],
+                error_code: None,
+                error_message: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let report = store.usage_report(7).await.unwrap();
+    assert_eq!(report.summary.requests, 1);
+    assert_eq!(report.summary.usage_requests, 1);
+    assert_eq!(report.summary.total_tokens, 19);
+    assert_eq!(report.summary.cache_write_tokens, 2);
+    assert_eq!(report.summary.avg_ttft_ms, Some(80.0));
+    assert_eq!(report.by_provider[0].label, "test-provider");
+    assert_eq!(report.daily.len(), 7);
 }

@@ -159,7 +159,7 @@ export function Playground() {
                 ))}
               </Select>
             </Field>
-            <Field label="上游模型" className="span-2" hint="请求会使用 provider/model 路由；也可以在路由页配置别名。">
+            <Field label="上游模型" className="span-2" hint="请求会使用 provider/model 前缀选择上游。">
               <Input value={upstreamModel} onChange={(event) => setUpstreamModel(event.target.value)} placeholder="gpt-4.1-mini" />
             </Field>
             <Field label="System / Instructions" className="span-2">

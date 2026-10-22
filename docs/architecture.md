@@ -20,7 +20,7 @@ Selena does **not** have a fixed Chat Completions egress. Every provider declare
 | Responses | convert | passthrough | convert |
 | Messages | convert | convert | passthrough |
 
-- **Diagonal**: the request is forwarded in its original protocol. Only model routing/auth is applied; SSE bytes are relayed. Native-only features such as Responses state/hosted tools or Anthropic thinking/server tools remain intact.
+- **Diagonal**: the request is forwarded in its original protocol. Only provider selection/auth is applied; SSE bytes are relayed. Native-only features such as Responses state/hosted tools or Anthropic thinking/server tools remain intact.
 - **Off-diagonal**: request decodes to a canonical IR, the target encoder emits the provider body, and the upstream response is decoded and encoded back to the ingress protocol.
 - **Fail-fast**: native-only capability that cannot be represented in the target protocol returns `unsupported_feature`. Active hosted/server tool definitions, Responses state, and audio are never simulated.
 - **Opaque history**: Anthropic thinking blocks, signatures, and server-tool result blocks cannot cross protocols by design. They are dropped with a conversion warning rather than rejected, so clients that replay full history (including Claude Code) can still use non-Anthropic providers. Selena never fabricates or replays a signature.
@@ -30,7 +30,7 @@ Selena does **not** have a fixed Chat Completions egress. Every provider declare
 ```
 crates/
   selena-protocol/  pure protocol IR, 3 codecs, SSE parser, conversion tests
-  selena-core/      config, SQLite, providers, key pool, routing, secrets
+  selena-core/      config, SQLite, providers, key pool, secrets
   selena-server/    axum gateway, admin API, SSE bridge, embedded SPA
   selena-cli/       `selena` binary, command dispatch, TUI
   selena-desktop/   Tauri v2 shell
@@ -52,7 +52,7 @@ Dependency direction: `selena-protocol ← selena-core ← selena-server ← sel
 
 ## Storage
 
-SQLite WAL (`selena.db`) stores providers, provider keys, routes, client keys, request metadata, and settings. Provider secrets are encrypted with XChaCha20-Poly1305 using a local master key (or `SELENA_MASTER_KEY`). Request/response bodies are not stored by default.
+SQLite WAL (`selena.db`) stores providers, provider keys, client keys, request metadata, and settings. Provider secrets are encrypted with XChaCha20-Poly1305 using a local master key (or `SELENA_MASTER_KEY`). Request/response bodies are not stored by default.
 
 ## Security boundaries
 

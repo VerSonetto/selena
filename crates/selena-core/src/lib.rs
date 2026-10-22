@@ -10,7 +10,7 @@ use crate::config::{AppConfig, ConfigPaths};
 use crate::db::Database;
 use crate::models::{
     ModelPool, ModelPoolEntry, ModelProviderRef, NewRequestLog, Overview, Provider, ProviderModel,
-    ProviderModelGroup, ResolvedRoute, Route,
+    ProviderModelGroup, RequestLogCompletion, ResolvedRoute, UsageReport,
 };
 use crate::provider::ProviderClient;
 use crate::secrets::SecretBox;
@@ -252,14 +252,6 @@ impl Core {
                 upstream_model: upstream.to_string(),
             });
         }
-        if let Some(route) = self.store.find_route(model).await?
-            && let Some(provider) = self.store.get_provider(&route.provider_id).await?
-        {
-            return Ok(ResolvedRoute {
-                provider,
-                upstream_model: route.upstream_model,
-            });
-        }
         let default = match self.store.get_setting("default_provider").await? {
             Some(id) => self.store.get_provider(&id).await?,
             None => None,
@@ -349,6 +341,14 @@ impl Core {
         self.store.insert_request_log(log).await
     }
 
+    pub async fn update_request_log(&self, id: &str, update: RequestLogCompletion) -> Result<()> {
+        self.store.update_request_log(id, update).await
+    }
+
+    pub async fn usage_report(&self, days: i64) -> Result<UsageReport> {
+        self.store.usage_report(days).await
+    }
+
     pub async fn overview(&self) -> Result<Overview> {
         let (host, port) = crate::runtime::read_runtime(&self.paths.runtime_file)
             .map(|runtime| (runtime.host, runtime.port))
@@ -357,18 +357,13 @@ impl Core {
     }
 
     pub async fn list_models(&self) -> Result<Vec<String>> {
-        let routes: Vec<Route> = self.store.list_routes().await?;
         let providers = self.store.list_providers().await?;
         let enabled = providers
             .iter()
             .filter(|provider| provider.enabled)
             .map(|provider| (provider.id.as_str(), provider))
             .collect::<HashMap<_, _>>();
-        let mut models = routes
-            .into_iter()
-            .filter(|route| route.enabled)
-            .map(|route| route.model_alias)
-            .collect::<Vec<_>>();
+        let mut models = Vec::new();
         for provider in enabled.values() {
             models.push(format!("{}/auto", provider.name));
         }

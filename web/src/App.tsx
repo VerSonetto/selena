@@ -6,7 +6,6 @@ import { Login } from "./pages/Login";
 import { Overview } from "./pages/Overview";
 import { Providers } from "./pages/Providers";
 import { Models } from "./pages/Models";
-import { RoutesPage } from "./pages/Routes";
 import { Keys } from "./pages/Keys";
 import { Playground } from "./pages/Playground";
 import { Logs } from "./pages/Logs";
@@ -87,7 +86,6 @@ export function App() {
           <Route index element={<Overview />} />
           <Route path="providers" element={<Providers />} />
           <Route path="models" element={<Models />} />
-          <Route path="routes" element={<RoutesPage />} />
           <Route path="keys" element={<Keys />} />
           <Route path="playground" element={<Playground />} />
           <Route path="logs" element={<Logs />} />

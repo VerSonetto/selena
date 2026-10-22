@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -36,15 +36,6 @@ CREATE TABLE IF NOT EXISTS provider_keys (
 );
 CREATE INDEX IF NOT EXISTS idx_provider_keys_provider ON provider_keys(provider_id);
 
-CREATE TABLE IF NOT EXISTS routes (
-    id TEXT PRIMARY KEY,
-    model_alias TEXT NOT NULL UNIQUE,
-    provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-    upstream_model TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS client_keys (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -73,7 +64,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
     ttft_ms INTEGER,
     input_tokens INTEGER,
     output_tokens INTEGER,
+    total_tokens INTEGER,
     cached_tokens INTEGER,
+    cache_write_tokens INTEGER,
     reasoning_tokens INTEGER,
     conversion_warnings TEXT NOT NULL DEFAULT '[]',
     upstream_request_id TEXT,
@@ -81,6 +74,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_request_logs_ts ON request_logs(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(provider_id);
+CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status_code);
+CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model_requested);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -113,6 +108,24 @@ impl Database {
             .execute(&pool)
             .await
             .context("initialize Selena schema")?;
+        ensure_column(&pool, "request_logs", "total_tokens", "INTEGER").await?;
+        ensure_column(&pool, "request_logs", "cache_write_tokens", "INTEGER").await?;
         Ok(Self { pool })
     }
+}
+
+async fn ensure_column(pool: &SqlitePool, table: &str, column: &str, kind: &str) -> Result<()> {
+    let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+        .fetch_all(pool)
+        .await?;
+    if columns
+        .iter()
+        .any(|row| row.get::<String, _>("name") == column)
+    {
+        return Ok(());
+    }
+    sqlx::raw_sql(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"))
+        .execute(pool)
+        .await?;
+    Ok(())
 }

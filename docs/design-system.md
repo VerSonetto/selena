@@ -4,11 +4,11 @@ Selena's console is not a generic admin template. It borrows the language of a p
 
 ## Principles
 
-1. **Quiet surface, sharp signal.** Most of the page is warm neutral; coral is reserved for actions, errors, and the active route; teal marks live/healthy state.
+1. **Quiet surface, sharp signal.** Most of the page is warm neutral; coral is reserved for actions, errors, and the active navigation item; teal marks live/healthy state.
 2. **Editorial hierarchy.** Display serif headlines, small uppercase labels, and compact mono metadata. Avoid oversized dashboard cards with no point of view.
 3. **One idea per page.** Each page opens with a sentence that explains the control surface, not a generic "Welcome back".
 4. **Motion with restraint.** 160–240ms transitions, page fade/slide, modal rise. Respect `prefers-reduced-motion`.
-5. **Density where it matters.** Logs, keys, and routes are dense and scannable; overview and settings get breathing room.
+5. **Density where it matters.** Logs and keys are dense and scannable; overview and settings get breathing room.
 
 ## Color tokens
 

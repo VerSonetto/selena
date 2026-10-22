@@ -1,3 +1,4 @@
+use crate::stream_meter::StreamMeter;
 use axum::body::Body;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -19,6 +20,7 @@ struct BridgeState {
     decoder: Box<dyn StreamDecoder>,
     encoder: Box<dyn StreamEncoder>,
     pending: VecDeque<Bytes>,
+    meter: StreamMeter,
     done: bool,
 }
 
@@ -27,6 +29,7 @@ pub fn bridge_response(
     ingress: Protocol,
     upstream_protocol: Protocol,
     chat_include_usage: bool,
+    meter: StreamMeter,
 ) -> Response {
     let state = BridgeState {
         upstream: Box::pin(upstream.bytes_stream()),
@@ -34,6 +37,7 @@ pub fn bridge_response(
         decoder: decoder_for(upstream_protocol),
         encoder: encoder_for(ingress, chat_include_usage),
         pending: VecDeque::new(),
+        meter,
         done: false,
     };
 
@@ -123,6 +127,7 @@ fn process_event(state: &mut BridgeState, event: SseEvent) {
 }
 
 fn encode_canonical(state: &mut BridgeState, event: &CanonicalStreamEvent) {
+    state.meter.observe(event);
     match state.encoder.encode(event) {
         Ok(events) => {
             for event in events {
@@ -138,6 +143,7 @@ fn enqueue_error(state: &mut BridgeState, error: ProtocolError) {
         return;
     }
     state.done = true;
+    state.meter.observe_error(&error);
     if let Ok(events) = state.encoder.encode(&CanonicalStreamEvent::Error { error }) {
         for event in events {
             queue_event(state, &event);
@@ -152,4 +158,10 @@ fn enqueue_error(state: &mut BridgeState, error: ProtocolError) {
 
 fn queue_event(state: &mut BridgeState, event: &SseEvent) {
     state.pending.push_back(Bytes::from(encode_event(event)));
+}
+
+impl Drop for BridgeState {
+    fn drop(&mut self) {
+        self.meter.finish(self.done);
+    }
 }
